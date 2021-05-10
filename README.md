@@ -25,6 +25,7 @@ https://github.com/shendeguize/GoogleCppStyleGuideCN)
     - [2.3. 包含你使用的内容](#23-包含你使用的内容)
     - [2.4. 前向声明](#24-前向声明)
     - [2.5. 内联函数](#25-内联函数)
+    - [2.6. 包含的名称和顺序](#26-包含的名称和顺序)
 
 ## 内容列表
 ***TODO***
@@ -179,6 +180,71 @@ ABSL_DECLARE_FLAG(flag_in_b);
 
 很重要的事情是了解函数并不是总是内敛的,即使声明如此.例如虚函数或者递归函数通常不内联.通常递归函数不应该内联.内联一个虚函数的主要原因是为了将其定义放在类内,或是为了方便或者为了描述其行为,例如访问器和修改器.
 
+### 2.6. 包含的名称和顺序
+
+请按照下述顺序包含头文件:
++ 相关头文件
++ C系统头文件
++ C++标准库头文件
++ 其他库文件
++ 你的项目库头文件
+
+所有的项目头文件应该项目根目录的子目录而非使用目录别名`.`(当前目录)或者`..`(上级目录).例如`google-awesome-project/src/base/logging.h`应当以下述方式被包含:
+
+```C++
+#include "base/logging.h"
+```
+
+在`dir/foo.cc`或`dir/foo_test.cc`(用于实现或者测试`dir2/foo2.h`中内容)中,包含目录应如下排序:
+
++ `dir2/foo2.h`
++ 一行空行
++ C系统头文件(更具体而言:带`<>`的`.h`拓展) 例如`<unistd.h>`,`<stdlib.h>`.
++ 一行空行
++ C++标准库头文件(无文件拓展名)例如`<algorithm>`,`<cstddef>`.
++ 一行空行
++ 其他库的`.h`头文件
++ 你项目的`.h`头文件
+
+使用空行划分每个非空的组.
+
+按照这一顺心,如果相关的头文件`dir2/foo2.h`忽略了任意必须的包含内容,对`dir/foo.cc`或者`dir/foo_test.cc`的构建就会失败.因此这一规则确保了是使用这些文件的人首先看到构建失败而不是其他无辜的使用者遇到问题.
+
+`dir/foo.cc`和`dir2/foo2.h`通常在同一目录下,例如`base/basictypes_test.cc`和`base/basictypes.h`但是有时也可能在不同的目录下.
+
+主要C头文件例如`stddef.h`本质上与其C++标准头文件(`cstddef`)可以互换.两种样式都可以接受,但请与既有代码保持一致性.
+
+在包含列表的每一部分,都应该依照字母顺序排列.注意,老式的代码可能不符合这一规范,在方便时应做修改.
+
+例如,`google-awesome-project/src/foo/internal/fooserver.cc`的包含列表应如下:
+
+```C++
+#include "foo/server/fooserver.h"
+
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <string>
+#include <vector>
+
+#include "base/basictypes.h"
+#include "base/commandlineflags.h"
+#include "foo/server/bar.h"
+```
+
+**例外情况:**
+
+有时,指定系统的代码需要条件化包含.这样的代码可能会在其他包含项后添加条件包含.当然请确保你指定系统的代码小而且本地化,例如:
+
+```C++
+#include "foo/public/fooserver.h"
+
+#include "base/port.h"  // For LANG_CXX11.
+
+#ifdef LANG_CXX11
+#include <initializer_list>
+#endif  // LANG_CXX11
+```
 
 
 ==翻译工作区:==
