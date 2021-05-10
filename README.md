@@ -1,5 +1,6 @@
 # GoogleCppStyleGuideCN
 Google C++ Style Guide CN 谷歌C++代码风格指南中文翻译
+
 Translator: [shendeguize@github](
 https://github.com/shendeguize)
 
@@ -12,6 +13,7 @@ https://github.com/shendeguize/GoogleCppStyleGuideCN)
 (p.s. 谷歌翻译感觉有点厉害.)  
 
 *如有引用,请注明出处*
+
 ## 目录
 - [GoogleCppStyleGuideCN](#googlecppstyleguidecn)
   - [目录](#目录)
