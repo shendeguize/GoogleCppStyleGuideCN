@@ -28,6 +28,12 @@ https://github.com/shendeguize/GoogleCppStyleGuideCN)
     - [2.4. 前向声明](#24-前向声明)
     - [2.5. 内联函数](#25-内联函数)
     - [2.6. 包含的名称和顺序](#26-包含的名称和顺序)
+  - [3. 作用域](#3-作用域)
+    - [3.1. 命名空间](#31-命名空间)
+    - [3.2. 内部链接](#32-内部链接)
+    - [3.3. 非成员,静态成员和全局函数](#33-非成员静态成员和全局函数)
+    - [3.4. 局部变量](#34-局部变量)
+    - [3.5. 静态和全局变量](#35-静态和全局变量)
 
 ## 内容列表
 ***TODO***
@@ -247,6 +253,233 @@ ABSL_DECLARE_FLAG(flag_in_b);
 #include <initializer_list>
 #endif  // LANG_CXX11
 ```
+
+## 3. 作用域
+
+### 3.1. 命名空间
+
+**定义:**
+
+除少数例外情况以外,代码应在命名空间内.命名空间依据项目名以及可能的路径具有独有的名称.不要使用`using`指令(例如`using namespace foo`).不要使用内联命名空间.有关匿名命名空间,参见[内部链接](https://google.github.io/styleguide/cppguide.html#Internal_Linkage).
+
+**优点:**
+
+命名空间将全局作用域细分为不同的命名空间,这对于避免全局作用域下的命名冲突很有帮助.
+
+命名空间同理一种在大型程序中避免命名冲突的方法,同事允许大多数可以合理使用简短的名称.
+
+例如,如果两个不同的项目在全局作用域内都有类`Foo`,这些符号可能在编译或者运行时产生冲突.如果每个项目都把他们的代码放置于命名空间里,那么`project1::Foo`和`project2::Foo`现在就是不冲突不同符号.在每个项目命名空间内的代码也能够据需引用`Foo`而不用使用前缀.
+
+内联命名空间会自动的将他们的名字置于封闭作用域内.请思考下述样例代码段:
+
+```C++
+namespace outer {
+inline namespace inner {
+  void foo();
+}  // namespace inner
+}  // namespace outer
+```
+
+表达式`outer::inner::foo()`和`outer::foo()`是可替换的.内联命名空间主要用于跨版本ABI兼容性.
+
+**缺点::**
+
+命名空间可能会造成混淆,因为命名空间会让搞清楚名称所指定义的机制变得复杂.
+
+内联命名空间尤其会造成混淆因为名称实际上并不受限于其所声明的命名空间.内联命名空间只在一些大型的版本控制策略中有用.
+
+在某系情况下,有必要使用完全限定的名称来重复引用符号.对于深层次嵌套的命名空间,这可能会引发很多混乱.
+
+**建议:**
+
+命名空间应按下述方式使用:
+
++ 遵循[命名空间命名](https://google.github.io/styleguide/cppguide.html#Namespace_Names)中的规定
++ 应按照下述样例所示,用注释结束多行命名空间.
++ 命名空间应在`include`和`gflags`定义或生命和其他命名空间中类的前向声明之后包含完整代码.
+
+    ```C++
+    // In the .h file
+    namespace mynamespace {
+
+    // All declarations are within the namespace scope.
+    // Notice the lack of indentation.
+    class MyClass {
+    public:
+    ...
+    void Foo();
+    };
+
+    }  // namespace mynamespace
+    ```
+
+    ```C++
+    // In the .cc file
+    namespace mynamespace {
+
+    // Definition of functions is within scope of the namespace.
+    void MyClass::Foo() {
+    ...
+    }
+
+    }  // namespace mynamespace
+    ```
+    更复杂的`.cc`文件可能有额外的细节,例如`flags`或者`using`声明:
+
+    ```C++
+    #include "a.h"
+
+    ABSL_FLAG(bool, someflag, false, "dummy flag");
+
+    namespace mynamespace {
+
+    using ::foo::Bar;
+
+    ...code for mynamespace...    // Code goes against the left margin.
+
+    }  // namespace mynamespace
+    ```
++ 要将生成协议消息信息(protocol message)的代码放在命名空间内,在`.proto`文件中使用`package`表示符指明.参见[协议缓冲区包](https://developers.google.com/protocol-buffers/docs/reference/cpp-generated#package).
++ 不要在命名空间`std`内声明任何内容,包括不要前向声明标准库的类.声明命名空间`std`内的实体是一个未定义的行为,即不可以值得.为了声明标准库中的实体,请包含适合的头文件.
++ 不应该使用(may not)`using`指令来让命名空间内的所有名称可用.:
+    ```C++
+    // Forbidden -- This pollutes the namespace.
+    using namespace foo;
+    ```
++ 除非在显示表明的只在内部使用的命名空间中以外,都不要(do not)使用命名空间别名.因为导入到头文件中的命名空间里的任何内容都会是改文件导出公共API的一部分.
+    ```C++
+    // Shorten access to some commonly used names in .cc files.
+    namespace baz = ::foo::bar::baz;
+    ```
+    ```C++
+    // Shorten access to some commonly used names (in a .h file).
+    namespace librarian {
+    namespace impl {  // Internal, not part of the API.
+    namespace sidetable = ::pipeline_diagnostics::sidetable;
+    }  // namespace impl
+
+    inline void my_inline_function() {
+    // namespace alias local to a function (or method).
+    namespace baz = ::foo::bar::baz;
+    ...
+    }
+    }  // namespace librarian
+    ```
++ 不要使用内联命名空间
+
+### 3.2. 内部链接
+
+当在一个`.cc`文件内的定义不需要在文件外进行引用时,可以通过把它们放到匿名命名空间内或者将他们声明为`static`来进行内部链接.不要在`.h`文件中使用任何一种这样的构造方式.
+
+**定义:**
+
+通过置于匿名命名空间,所有的声明都可以被设为内部链接.函数和变量也可以通过声明为`static`以设为内部链接.这意味着任何你声明的内容不能被其他文件访问.如果一个其他文件声明了一些同名的内容,那么两个实体是完全独立的.
+
+**建议:**
+
+对于那些不会在任何其他地方被引用的代码,鼓励在`.cc`文件内使用内部链接.不要再`.h`文件里使用内部链接.
+
+按照显式命名空间一样的格式来使用命名空间.在结尾注释里,让命名空间留空即可:
+
+```C++
+namespace {
+...
+}  // namespace
+```
+
+### 3.3. 非成员,静态成员和全局函数
+
+优先将非成员函数放入命名空间里,尽量少使用完全全局的函数.不要单纯使用一个类来管理静态成员.类的静态方法应该通常与该类的实例或这个类的静态数据关联.
+
+**优点:**
+
+非成员和静态成员函数在一些情况下很有用.将非成员函数放在命名空间内能够避免污染全局命名空间.
+
+**缺点:**
+
+非成员和静态成员函数可能(may)在作为一个新类的成员时是有用的,尤其它们访问外部资源或者有重要的依赖项时.
+
+**建议:**
+
+有的时候定义一个不绑定到类实例的函数很有用.例如一个函数可能既是静态成员也是非成员函数.非成员函数应该不依赖于外部变量,应该几乎总存在于命名空间内.不要只是为了组织静态成员而创建类,这和仅仅给这些命名一个通用的前缀没有什么不同,而且这种分组通常不必要.
+
+如果你定义一个非成员函数而且只在它的`.cc`文件内需要,那么使用[内部链接](https://google.github.io/styleguide/cppguide.html#Internal_Linkage)来限制其作用域.
+
+### 3.4. 局部变量
+
+将函数的变量限制在尽可能小的作用域中,并在声明中初始化变量.
+
+C++允许你在函数的任何地方声明变量.我们建议您尽可能在局部范围内声明这些变量,尽可能靠近首次使用它的位置.这会让使用者更容易找到声明并发现这个变量的类型是什么以及被初始化成了什么.尤其是应该使用初始化而不是声明再赋值,例如:
+
+```C++
+int i;
+i = f();      // Bad -- initialization separate from declaration.
+```
+
+```C++
+int j = g();  // Good -- declaration has initialization.
+```
+
+```C++
+std::vector<int> v;
+v.push_back(1);  // Prefer initializing using brace initialization.
+v.push_back(2);
+```
+
+```C++
+std::vector<int> v = {1, 2};  // Good -- v starts initialized.
+```
+
+`if`,`while`和`for`语句等所需的变量通常在这些语句中声明,所有这些变量被限制在这些作用域内,例如:
+
+```C++
+while (const char* p = strchr(str, '/')) str = p + 1;
+```
+
+有一个需要注意的事情:如果一个变量是一个对象,它的构造器每次它进入作用域和被创建时都被调用,而析构器则在其每次离开作用于都被调用.
+
+```C++
+// Inefficient implementation:
+for (int i = 0; i < 1000000; ++i) {
+  Foo f;  // My ctor and dtor get called 1000000 times each.
+  f.DoSomething(i);
+}
+```
+
+```C++
+Foo f;  // My ctor and dtor get called once each.
+for (int i = 0; i < 1000000; ++i) {
+  f.DoSomething(i);
+}
+```
+
+### 3.5. 静态和全局变量
+
+具有[静态存储持续时间](http://en.cppreference.com/w/cpp/language/storage_duration#Storage_duration)的对象时禁止使用的,除非他们是[可平凡析构的(trivially destructible)](http://en.cppreference.com/w/cpp/types/is_destructible).非正式的来说,这意味着析构器什么都不做,即使考虑到成员和积累析构器也是如此.正式的来讲,这一位置该类型没有用户定义析构函数或者虚析构函数而且所有的基类和费静态成员都可平凡析构.静态函数局部变量可以进行动态生成.不建议对静态类成员变量或者命名空间内变量使用动态初始化,但是在一些特定情况下也是允许使用的,具体细节可以参考下述内容.
+
+一个经验法则:如果单独考虑声明,可以是`constexpr`,那么全局变量就符合这些要求.
+
+**定义:**
+
+每一个对象都有其*存储周期*,并相关于其生命周期.有静态存储周期的对象从其初始化到程序结束期间生存.这些对象在命名空间作用域内表现为变量("全局变量),例如类的静态数据成员,或作为带有`static`标识声明的函数内部变量.函数局部静态变量是在控制流首次通过其声明时初始化的.所有的其他带有静态存储周期的对象时作为成语启动的一部分初始化的.所有带有静态存储周期的对象都在程序退出时校徽(这发生在未合并的线程终止之前).
+
+初始化可以(may)是*动态的*,这意味着在初始化中会有一些不重要的事情发生.(例如,考虑一个构造器声明了内存或者一个变量伴随着其进程id初始化).另一种类型初始化是*静态*初始化.这两者并不那么相对立.静态初始化*总是(always)*发生在有静态存储周期的对象上(要么初始化这个对象到某一常数或者到代表性的0字节组).而动态初始化在这之后发生,如果需要的话.
+
+**优点:**
+
+全局和静态变量对于大量的使用而言是很有效的.命名常量,某些转换单元的内部辅助数据结构,命令行标志,注册机制,后台结构等.
+
+**缺点:**
+
+使用动态初始化或者有非平凡析构的全局或静态变量会产生易于导致难以发现的bug的复杂性.动态初始化没有在翻译单元或销毁过程里排序(除非销毁是按照初始化的反序发生).当初始化依赖于有着静态存储周期的其他变量是,坑你导致这个对象在其生命周期开始前就被访问(或在其生命周期终止后被访问.)此外,当一个程序启动结束时未合并的线城市,这些线程可能试图访问生命周期已经结束析构器已经运行的对象.
+
+**建议:**
+
+
+
+
+
+
 
 
 ==翻译工作区:==
