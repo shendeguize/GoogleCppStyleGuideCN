@@ -34,6 +34,10 @@ https://github.com/shendeguize/GoogleCppStyleGuideCN)
     - [3.3. 非成员,静态成员和全局函数](#33-非成员静态成员和全局函数)
     - [3.4. 局部变量](#34-局部变量)
     - [3.5. 静态和全局变量](#35-静态和全局变量)
+      - [关于析构的建议](#关于析构的建议)
+      - [关于初始化的建议](#关于初始化的建议)
+      - [普遍模式](#普遍模式)
+    - [3.6. 线程局部变量](#36-线程局部变量)
 
 ## 内容列表
 ***TODO***
@@ -475,12 +479,143 @@ for (int i = 0; i < 1000000; ++i) {
 
 **建议:**
 
+#### 关于析构的建议
+
+当析构器比较琐碎时,这些析构器的执行完全不受顺序限制(它们实际上是不"运行"的).否则我们就会面临在对象的生命周期结束后访问对象的风险.因此我们只允许可平凡析构的有静态存储周期的对象.基础类型(例如指针和`int`)是平凡析构的,而可平凡析构类型的数组也是一样.注意标明`constexpr`的变量也是可平凡析构的.
+
+```C++
+const int kNum = 10;  // allowed
+
+struct X { int n; };
+const X kX[] = {{1}, {2}, {3}};  // allowed
+
+void foo() {
+  static const char* const kMessages[] = {"hello", "world"};  // allowed
+}
+
+// allowed: constexpr guarantees trivial destructor
+constexpr std::array<int, 3> kArray = {{1, 2, 3}};
+```
+
+```C++
+// bad: non-trivial destructor
+const std::string kFoo = "foo";
+
+// bad for the same reason, even though kBar is a reference (the
+// rule also applies to lifetime-extended temporary objects)
+const std::string& kBar = StrCat("a", "b", "c");
+
+void bar() {
+  // bad: non-trivial destructor
+  static std::map<int, int> kData = {{1, 0}, {2, 0}, {3, 0}};
+}
+```
+
+注意引用不是对象,因此他们不收析构性限制.但是动态初始化的限制仍然存在特卫视一个形如`staticT& t = *new T`的函数局部静态引用是允许的.
+
+#### 关于初始化的建议
+
+初始化是一个更复杂的话题.因为我们不惜不只是考虑到一个类构造器是否执行,也需要考虑初始化器的执行:
+
+```C++
+int n = 5;    // fine
+int m = f();  // ? (depends on f)
+Foo x;        // ? (depends on Foo::Foo)
+Bar y = g();  // ? (depends on g and on Bar::Bar)
+```
+除了首条语句以外,我们都面临着不确定的初始化顺序.
+
+我们所寻求的概念在正式的C++语言标准中称为*常量初始化*.这意味着初始化表达式是一个常量表达式,而且如果对象是通过构造器调用初始化的,那么构造器也必须指定为`constexpr`:
+
+```C++
+struct Foo { constexpr Foo(int) {} };
+
+int n = 5;  // fine, 5 is a constant expression
+Foo x(2);   // fine, 2 is a constant expression and the chosen constructor is constexpr
+Foo a[] = { Foo(1), Foo(2), Foo(3) };  // fine
+```
+
+常量初始化总是允许的.有静态存储周期的变量的常量初始化应该被标为`constexpr`或者在有`[ABSL_CONST_INIT](https://github.com/abseil/abseil-cpp/blob/03c1513538584f4a04d666be5eb469e3979febba/absl/base/attributes.h#L540)`属性的地方.任何未按上述要求标明的非局部的静态存储周期变量都应假定为动态初始化,并且仔细检查.
+
+相比之下呢,下述初始化是有问题的:
+
+```C++
+// Some declarations used below.
+time_t time(time_t*);      // not constexpr!
+int f();                   // not constexpr!
+struct Bar { Bar() {} };
+
+// Problematic initializations.
+time_t m = time(nullptr);  // initializing expression not a constant expression
+Foo y(f());                // ditto
+Bar b;                     // chosen constructor Bar::Bar() not constexpr
+```
+
+不鼓励使用非局部变量的动态初始化,通常情况下是禁止这样的.但我们也在程序的任一方面都不依赖于此初始化相对于其他初始化的顺序时允许这种行为.在这些限制条件下,初始化的顺序不会有明显差别.例如:
+
+```C++
+int p = getpid();  // allowed, as long as no other static variable
+                   // uses p in its own initialization
+```
+
+静态局部变量的动态初始化是允许(且普遍的).
+
+#### 普遍模式
+
++ 全局字符串: 如果你需要一个全局或静态字符串常量,考虑使用简单字符串数组或者指向字符串文本首字符元素的指针.字符串文本具有静态存储周期已经也通常来说足够了.
++ 映射,集合和其他动态容器: 如果你需要一个静态的,固定的容器,例如一个一个用于搜索或查找表的集合,则不能(cannot)使用标准库中的动态容器作为静态变量.因为他们有非平凡析构器.相对的,考虑平凡类型的简单数组例如一个整数数组的数组(对于整数到整数的映射).或者一个`pair`对的数组(例如由`int`和`const char*`的对组成).对于小容器,线性搜索效率已经足够(而且由于内存局部性的原因,效率很高).请考虑使用[absl/algorithm/container.h](https://github.com/abseil/abseil-cpp/blob/master/absl/algorithm/container.h)中的工具用于标准操作.如果必要的话,保持容器有序并使用二分搜索.如果你真的需要使用标准库中的动态容器.考虑使用函数局部景泰直镇,如下文所述.
++ 智能指针(`unique_ptr`和`shared_ptr`): 智能指针在析构期间执行清理故而禁止使用.考虑你使用的清晰是否符合本节所属的其它模式.一个简单的解决方案是使用指向动态分配对象的普通指针并且永不删除它.(参见后述条目).
++ 自定义类型的静态变量: 如果你需要静态的某一个你需要自定义的类的常量数据,为该类添加一个平凡析构器和`constexpr`构造器.
++ 如果所有其他方法都不行,那么你可以通过使用函数局部静态指针或引用(例如`static const auto& impl = *new T(args...);`)来动态创建一个对象并且从不删除它.
+
+### 3.6. 线程局部变量
+
+未在函数内声明的`thread_local`线程局部变量必须(must)用真正的编译时常量初始化,并且这必须(must)使用[ABSL_CONST_INIT](https://github.com/abseil/abseil-cpp/blob/master/absl/base/attributes.h)属性来强制执行.和其他定义线程局部数据的方式相比,`thread_local`的方式更可取.
+
+**定义:**
+
+从C++11开始,变量可以通过`thread_local`标识符声明:
+
+```C++
+thread_local Foo foo = ...;
+```
+
+这样的变量实际上是对象的集合,因此当不同的线程访问时,线程实际上访问的是不同的对象.从很多方面来看`thread_local`变量更像是[静态存储周期变量](https://google.github.io/styleguide/cppguide.html#Static_and_Global_Variables).例如这些变量可以在命名空间中,在函数内部或者作为静态类成员来声明但是不能作为普通类成员.
+
+**优点:**
+
++ 线程局部数据天生不会发生竞争(因为通常只有一个线程可以访问)这使得`thread_local`对于并发编程很有用.
++ `thread_local`是唯一受标准支持的创建线程局部数据的方式.
+
+**缺点:**
+
++ 访问`thread_local`变量可能会触发执行不可预测和不可控数量的其他代码.
++ `thread_local`变量实际上是全局变量,除了缺少线程安全性以外也有所有其他全局变量的缺点.
++ 一个`thread_local`边浪的内存消耗随着运行的线程数量增长而增长(在最坏情况下),而线程数可能在程序中非常大.
++ 普通类成员不可以是`thread_local`的
++ `thread_local`可能不如某些编译器故有函数有效.
+
+**建议:**
+
+函数内部的`thread_local`变量没有安全担忧,因此可以随意使用.注意你可以通弄个定义一个函数或静态方法来暴露`thread_local`以使用函数作用域内的`thread_local`来模拟类内或者命名空间作用域内的`thread_local`:
+
+```C++
+Foo& MyThreadLocalFoo() {
+  thread_local Foo result = ComplicatedInitialization();
+  return result;
+}
+```
+
+类捏或命名空间作用域内的`thread_local`变量必须要通过真正的编译时常量初始化(也就是必须是非动态初始化的).为了确保这一点,类内或命名空间内`thread_local`变量必须注明[ABSL_CONST_INIT](https://github.com/abseil/abseil-cpp/blob/master/absl/base/attributes.h)(或者也可以用`constexpr`,但应尽量少这样用):
+
+```c++
+ABSL_CONST_INIT thread_local Foo foo = ...;
+```
+
+相比于其他定义线程本地数据的机制,应优先使用`thread_local`.
 
 
-
-
-
-
+===================================================
 
 ==翻译工作区:==
 
